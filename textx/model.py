@@ -503,22 +503,46 @@ def parse_tree_to_objgraph(parser, parse_tree):
 
             line, col = parser.pos_to_linecol(obj_ref.position)
             raise TextXSemanticError(
-                message='Unknown object "{}" of class "{}" at {}'
-                        .format(obj_ref.obj_name, obj_ref.cls.__name__, (line, col)),
-                line=line,
-                col=col,
+                'Unknown object "{}" of class "{}" at {}'
+                .format(obj_ref.obj_name, obj_ref.cls.__name__, (line, col)),
+                line=line, col=col,
                 err_type=UNKNOWN_OBJ_ERROR,
                 expected_obj_cls=obj_ref.cls)
 
-        # If this object has attributes (created using a common rule)
-        for obj, attr, crossref in parser._crossrefs:
-            attr_value = getattr(obj, attr.name)
-            resolved = _resolve_link_rule_ref(crossref)
-            if attr.mult in [MULT_ONEORMORE, MULT_ZEROORMORE]:
-                attr_value.append(resolved)
-            else:
-                setattr(obj, attr.name, resolved)
-        del parser._crossrefs[:]
+        def _resolve_obj_attributes(o):
+            if parser.debug:
+                parser.dprint("RESOLVING CLASS: {}"
+                              .format(o.__class__.__name__))
+            if id(o) in resolved_set:
+                return
+            resolved_set.add(id(o))
+
+            # If this object has attributes (created using a common rule)
+            if hasattr(o.__class__, "_tx_attrs"):
+                for attr in o.__class__._tx_attrs.values():
+                    if parser.debug:
+                        parser.dprint("RESOLVING ATTR: {}".format(attr.name))
+                        parser.dprint("mult={}, ref={}, con={}".format(
+                                      attr.mult,
+                                      attr.ref, attr.cont))
+                    attr_value = getattr(o, attr.name)
+                    if attr.mult in [MULT_ONEORMORE, MULT_ZEROORMORE]:
+                        for idx, list_attr_value in enumerate(attr_value):
+                            if attr.ref:
+                                if attr.cont:
+                                    _resolve_obj_attributes(list_attr_value)
+                                else:
+                                    attr_value[idx] = \
+                                        _resolve_link_rule_ref(list_attr_value)
+                    else:
+                        if attr.ref:
+                            if attr.cont:
+                                _resolve_obj_attributes(attr_value)
+                            else:
+                                setattr(o, attr.name,
+                                        _resolve_link_rule_ref(attr_value))
+
+        _resolve_obj_attributes(model)
 
     def call_obj_processors(model_obj):
         """
