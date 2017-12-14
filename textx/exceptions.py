@@ -1,7 +1,7 @@
 # TextX Exceptions
 class TextXError(Exception):
     def __init__(self, message, line=None, col=None, err_type=None):
-        super(TextXError, self).__init__(message)
+        super(TextXError, self).__init__(message.encode('utf-8'))
         self.line = line
         self.col = col
         self.err_type = err_type
