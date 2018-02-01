@@ -917,8 +917,4 @@ def language_from_str(language_def, metamodel):
             lang_parser.parser_model,
             "{}_parser_model.dot".format(metamodel.rootcls.__name__))
 
-<<<<<<< HEAD
     return lang_parser
-=======
-    return lang_parser
->>>>>>> pull_request
