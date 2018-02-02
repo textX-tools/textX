@@ -124,6 +124,26 @@ class ObjCrossRef(object):
         self.position = position
 
 
+class RefRulePosition(object):
+    """
+    Used for "go to definition" support in textx-languageserver
+
+    Attributes:
+        name(str): A name of the target object.
+        ref_pos_start(int): Reference starting position
+        ref_pos_end(int): Reference ending position
+        def_pos_start(int): Starting position of referenced object
+        def_pos_end(int): Ending position of referenced object
+    """
+    def __init__(self, name, ref_pos_start, ref_pos_end,
+                 def_pos_start, def_pos_end):
+        self.name = name
+        self.ref_pos_start = ref_pos_start
+        self.ref_pos_end = ref_pos_end
+        self.def_pos_start = def_pos_start
+        self.def_pos_end = def_pos_end
+
+
 def get_model_parser(top_rule, comments_model, **kwargs):
     """
     Creates model parser for the given language.
@@ -450,25 +470,6 @@ def parse_tree_to_objgraph(parser, parse_tree):
                 parser.dprint("Resolving obj crossref: {}:{}"
                               .format(obj_ref.cls, obj_ref.obj_name))
 
-            class RefRulePosition(object):
-                """
-                Used for "go to definition" support in text
-
-                Attributes:
-                    name(str): A name of the target object.
-                    ref_pos_start(int): Reference starting position
-                    ref_pos_end(int): Reference ending position
-                    def_pos_start(int): Starting position of referenced object
-                    def_pos_end(int): Ending position of referenced object
-                """
-                def __init__(self, name, ref_pos_start, ref_pos_end,
-                             def_pos_start, def_pos_end):
-                    self.name = name
-                    self.ref_pos_start = ref_pos_start
-                    self.ref_pos_end = ref_pos_end
-                    self.def_pos_start = def_pos_start
-                    self.def_pos_end = def_pos_end
-
             def _inner_resolve_link_rule_ref(cls, obj_name):
                 """
                 Depth-first resolving of link rule reference.
@@ -489,14 +490,15 @@ def parse_tree_to_objgraph(parser, parse_tree):
                                                   obj_ref.obj_name)
 
             # Collect cross-references for textx-tools
-            if result and metamodel.textx_tools_support:
-                pos_crossref_list.append(
-                    RefRulePosition(name=obj_ref.obj_name,
-                                    ref_pos_start=obj_ref.position,
-                                    ref_pos_end=obj_ref.position +
-                                    len(result.name),
-                                    def_pos_start=result._tx_position,
-                                    def_pos_end=result._tx_position_end))
+            if result:
+                if metamodel.textx_tools_support:
+                    pos_crossref_list.append(
+                        RefRulePosition(name=obj_ref.obj_name,
+                                        ref_pos_start=obj_ref.position,
+                                        ref_pos_end=obj_ref.position +
+                                        len(result.name),
+                                        def_pos_start=result._tx_position,
+                                        def_pos_end=result._tx_position_end))
 
                 return result
 
@@ -509,47 +511,22 @@ def parse_tree_to_objgraph(parser, parse_tree):
             line, col = parser.pos_to_linecol(obj_ref.position)
             raise TextXSemanticError(
                 message='Unknown object "{}" of class "{}" at {}'
-                .format(obj_ref.obj_name, obj_ref.cls.__name__,
-                        (line, col)),
+                        .format(obj_ref.obj_name, obj_ref.cls.__name__,
+                                (line, col)),
                 line=line,
                 col=col,
                 err_type=UNKNOWN_OBJ_ERROR,
                 expected_obj_cls=obj_ref.cls)
 
-        def _resolve_obj_attributes(o):
-            if parser.debug:
-                parser.dprint("RESOLVING CLASS: {}"
-                              .format(o.__class__.__name__))
-            if id(o) in resolved_set:
-                return
-            resolved_set.add(id(o))
-
-            # If this object has attributes (created using a common rule)
-            if hasattr(o.__class__, "_tx_attrs"):
-                for attr in o.__class__._tx_attrs.values():
-                    if parser.debug:
-                        parser.dprint("RESOLVING ATTR: {}".format(attr.name))
-                        parser.dprint("mult={}, ref={}, con={}".format(
-                                      attr.mult,
-                                      attr.ref, attr.cont))
-                    attr_value = getattr(o, attr.name)
-                    if attr.mult in [MULT_ONEORMORE, MULT_ZEROORMORE]:
-                        for idx, list_attr_value in enumerate(attr_value):
-                            if attr.ref:
-                                if attr.cont:
-                                    _resolve_obj_attributes(list_attr_value)
-                                else:
-                                    attr_value[idx] = \
-                                        _resolve_link_rule_ref(list_attr_value)
-                    else:
-                        if attr.ref:
-                            if attr.cont:
-                                _resolve_obj_attributes(attr_value)
-                            else:
-                                setattr(o, attr.name,
-                                        _resolve_link_rule_ref(attr_value))
-
-        _resolve_obj_attributes(model)
+        # If this object has attributes (created using a common rule)
+        for obj, attr, crossref in parser._crossrefs:
+            attr_value = getattr(obj, attr.name)
+            resolved = _resolve_link_rule_ref(crossref)
+            if attr.mult in [MULT_ONEORMORE, MULT_ZEROORMORE]:
+                attr_value.append(resolved)
+            else:
+                setattr(obj, attr.name, resolved)
+        del parser._crossrefs[:]
 
     def call_obj_processors(model_obj):
         """
